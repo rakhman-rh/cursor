@@ -2,16 +2,24 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>Interactive Anglerfish (Inverse Kinematics)</title>
+    <!-- Meta viewport ini sangat penting agar skala layar di HP pas dan tidak bisa di-zoom tidak sengaja saat digeser -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Interactive Anglerfish (Mobile & Desktop)</title>
     <style>
         body {
             margin: 0;
             background-color: #050b14; /* Biru gelap kedalaman laut */
             overflow: hidden;
-            cursor: none; /* Menyembunyikan kursor asli agar digantikan lampu ikan */
+            cursor: none; /* Menyembunyikan kursor asli di laptop */
+            /* Mencegah browser Android melakukan refresh halaman secara tidak sengaja saat layar ditarik ke bawah */
+            overscroll-behavior: none; 
+            touch-action: none;
         }
         canvas {
             display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
         }
     </style>
 </head>
@@ -30,57 +38,75 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // === KONFIGURASI DARI KODE UTAMA ===
-        const FISH_SCALE = 1.3;
+        // === KONFIGURASI UTAMA ===
+        const FISH_SCALE = 1.2;
         const pointer = { x: window.innerWidth / 2, y: window.innerHeight / 2, velocityX: 0, velocityY: 0 };
-        let lastMouseX = window.innerWidth / 2;
-        let lastMouseY = window.innerHeight / 2;
+        let lastTouchX = window.innerWidth / 2;
+        let lastTouchY = window.innerHeight / 2;
         let biteTimer = 0;
 
         // Struktur Segmen Tulang Belakang (Inverse Kinematics)
         const numSegments = 18; 
         const segments = [];
         
-        // Inisialisasi posisi awal tulang belakang ikan
         for (let i = 0; i < numSegments; i++) {
             segments.push({
                 x: window.innerWidth / 2 + i * 15,
                 y: window.innerHeight / 2,
                 angle: 0,
-                length: i === 0 ? 25 : 14 * FISH_SCALE // Kepala lebih panjang
+                length: i === 0 ? 25 : 14 * FISH_SCALE
             });
         }
 
-        // Melacak Gerakan Mouse
-        window.addEventListener('mousemove', (e) => {
-            pointer.velocityX = e.clientX - lastMouseX;
-            pointer.velocityY = e.clientY - lastMouseY;
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
+        // --- FUNGSI UPDATE POSISI & VELOCITY ---
+        function handleMove(currentX, currentY) {
+            pointer.velocityX = currentX - lastTouchX;
+            pointer.velocityY = currentY - lastTouchY;
+            lastTouchX = currentX;
+            lastTouchY = currentY;
 
-            // Jika kursor bergerak sangat cepat, picu animasi gigitan
-            if (Math.hypot(pointer.velocityX, pointer.velocityY) > 25) {
+            if (Math.hypot(pointer.velocityX, pointer.velocityY) > 20) {
                 biteTimer = 24;
             }
+        }
+
+        // 1. Dukungan Desktop (Mouse)
+        window.addEventListener('mousemove', (e) => {
+            handleMove(e.clientX, e.clientY);
         });
 
-        // Loop Utama Animasi
+        // 2. Dukungan Android / Layar Sentuh (Touch Events)
+        // Memicu pergerakan saat jari pertama kali menyentuh layar
+        window.addEventListener('touchstart', (e) => {
+            if(e.touches.length > 0) {
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        // Memicu pergerakan saat jari digeser di atas layar
+        window.addEventListener('touchmove', (e) => {
+            if(e.touches.length > 0) {
+                handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        }, { passive: true });
+
+
+        // --- LOOP UTAMA ANIMASI ---
         function animate() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Redam kecepatan kursor perlahan ke posisi mouse asli
-            pointer.x += (lastMouseX - pointer.x) * 0.12;
-            pointer.y += (lastMouseY - pointer.y) * 0.12;
+            // Redam kecepatan kursor perlahan ke posisi sentuhan/mouse asli
+            pointer.x += (lastTouchX - pointer.x) * 0.12;
+            pointer.y += (lastTouchY - pointer.y) * 0.12;
 
-            // Deklarasi variabel hitungan fisika dari skrip utama
             const pointerSpeed = Math.hypot(pointer.velocityX, pointer.velocityY);
             const fastMovement = Math.min(Math.max(pointerSpeed - 12, 0) / 16, 1);
             const trailDistance = Math.min(pointerSpeed / 6, 1) * (34 + pointerSpeed * 0.22) * (1 - fastMovement * 0.55);
 
             if (biteTimer > 0) biteTimer--;
 
-            // --- PROSES INTERACTION / INVERSE KINEMATICS ---
-            // Kepala (Segmen 0) mengejar posisi pendaran lampu (posisi pointer mouse)
+            // Proses Inverse Kinematics
             let targetX = pointer.x;
             let targetY = pointer.y;
 
@@ -89,41 +115,34 @@
                 const dx = targetX - seg.x;
                 const dy = targetY - seg.y;
                 
-                // Hitung sudut rotasi segmen menuju target di depannya
                 seg.angle = Math.atan2(dy, dx);
-                
-                // Tarik segmen agar tetap tersambung sesuai panjangnya
                 seg.x = targetX - Math.cos(seg.angle) * seg.length;
                 seg.y = targetY - Math.sin(seg.angle) * seg.length;
 
-                // Segmen berikutnya akan mengejar ekor dari segmen saat ini
                 targetX = seg.x;
                 targetY = seg.y;
             }
 
-            // --- PROSES MENGGAMBAR (RENDER VISUAL ELEMEN) ---
+            // --- PROSES RENDER VISUAL ---
 
-            // 1. Efek Cahaya Lampu Anglerfish (Glow Effect)
+            // Cahaya Lampu Anglerfish
             ctx.save();
-            const glowGrd = ctx.createRadialGradient(pointer.x, pointer.y, 2, pointer.x, pointer.y, 180 + trailDistance * 2);
-            glowGrd.addColorStop(0, 'rgba(0, 220, 255, 0.8)');
-            glowGrd.addColorStop(0.1, 'rgba(0, 150, 255, 0.25)');
+            const glowGrd = ctx.createRadialGradient(pointer.x, pointer.y, 2, pointer.x, pointer.y, 160 + trailDistance * 2);
+            glowGrd.addColorStop(0, 'rgba(0, 220, 255, 0.85)');
+            glowGrd.addColorStop(0.1, 'rgba(0, 150, 255, 0.3)');
             glowGrd.addColorStop(0.5, 'rgba(0, 80, 150, 0.08)');
             glowGrd.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = glowGrd;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.restore();
 
-            // Titik Inti Lampu Kursor
+            // Inti Lampu
             ctx.beginPath();
             ctx.arc(pointer.x, pointer.y, 6 * FISH_SCALE, 0, Math.PI * 2);
             ctx.fillStyle = "#e0f7fa";
-            ctx.shadowBlur = 30;
-            ctx.shadowColor = "#00e5ff";
             ctx.fill();
-            ctx.shadowBlur = 0; // Reset shadow
 
-            // Menggambar seluruh struktur badan dari ekor ke kepala (agar tumpukan layer rapi)
+            // Gambar Badan dari Ekor ke Kepala
             for (let i = numSegments - 1; i >= 0; i--) {
                 const seg = segments[i];
                 ctx.save();
@@ -131,11 +150,10 @@
                 ctx.rotate(seg.angle);
 
                 ctx.strokeStyle = "rgba(200, 240, 255, 0.45)";
-                ctx.fillStyle = "rgba(10, 25, 40, 0.6)";
+                ctx.fillStyle = "rgba(10, 25, 40, 0.65)";
                 ctx.lineWidth = 1.5;
 
                 if (i === 0) {
-                    // 2. Menggambar Kepala & Rahang (Segmen Paling Depan)
                     // Antena Lampu
                     ctx.beginPath();
                     ctx.moveTo(0, 0);
@@ -149,18 +167,18 @@
                     ctx.fill();
                     ctx.stroke();
 
-                    // Rahang Bawah (Terbuka lebar berdasarkan biteTimer atau kecepatan)
+                    // Rahang Bawah
                     ctx.restore();
                     ctx.save();
                     ctx.translate(seg.x, seg.y);
-                    const biteOpen = biteTimer > 0 ? 0.6 : (0.1 + pointerSpeed * 0.01);
+                    const biteOpen = biteTimer > 0 ? 0.5 : (0.1 + pointerSpeed * 0.01);
                     ctx.rotate(seg.angle + biteOpen);
                     ctx.beginPath();
                     ctx.ellipse(5, 5, 22 * FISH_SCALE, 10 * FISH_SCALE, 0.2, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.stroke();
 
-                    // Gigi Tajam Transparan
+                    // Gigi
                     ctx.fillStyle = "rgba(230, 250, 255, 0.8)";
                     ctx.beginPath();
                     ctx.moveTo(12, 2); ctx.lineTo(15, 8); ctx.lineTo(17, 2);
@@ -168,7 +186,7 @@
                     ctx.fill();
                 } 
                 else if (i === numSegments - 1) {
-                    // 3. Menggambar Sirip Ekor (Segmen Paling Belakang)
+                    // Sirip Ekor
                     ctx.beginPath();
                     ctx.moveTo(0, 0);
                     ctx.bezierCurveTo(-20, -25, -40, -35, -45, -15);
@@ -180,16 +198,13 @@
                     ctx.stroke();
                 } 
                 else {
-                    // 4. Menggambar Susunan Duri Ikan (Tulang Rusuk Tengah)
-                    // Ukuran duri mengecil secara proporsional ke arah ekor
-                    const ribHeight = Math.sin((i / numSegments) * Math.PI) * 26 * FISH_SCALE;
-                    
+                    // Duri Rusuk
+                    const ribHeight = Math.sin((i / numSegments) * Math.PI) * 25 * FISH_SCALE;
                     ctx.beginPath();
                     ctx.moveTo(0, -ribHeight / 2);
                     ctx.lineTo(0, ribHeight / 2);
                     ctx.stroke();
 
-                    // Sirip Samping Dada (Diletakkan di sekitar sepertiga badan depan)
                     if (i === 4) {
                         ctx.beginPath();
                         ctx.ellipse(-5, 0, 12 * FISH_SCALE, 28 * FISH_SCALE, 0.5, 0, Math.PI, true);
@@ -201,7 +216,7 @@
                 ctx.restore();
             }
 
-            // Geser pelan nilai kecepatan kursor balik ke 0 saat mouse diam
+            // Geser nilai kecepatan kembali ke nol jika sentuhan berhenti diam di tempat
             pointer.velocityX *= 0.92;
             pointer.velocityY *= 0.92;
 
